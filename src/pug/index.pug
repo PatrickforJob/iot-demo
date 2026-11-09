@@ -34,7 +34,9 @@ block content
   .layout
     div
       .panel#detail
-        h2#detailTitle 點選下方裝置查看詳細波形
+        .panel-head
+          h2#detailTitle 點選下方裝置查看詳細波形
+          button.only-gyro#chartToggle 收合圖表
         canvas#bigChart
         .legend.only-fall
           span #[i.x]X 軸
@@ -50,6 +52,7 @@ block content
           span 單位：°/s（每秒轉幾度）
       .grid.only-fall#grid
         .empty 等待手機連線…#[br]請學生掃描 QR code 開啟網頁
+      .pager.only-gyro#gpager
       .grid.only-gyro#ggrid
         .empty 等待手機連線…#[br]請學生掃描 QR code 開啟網頁
 

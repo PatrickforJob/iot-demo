@@ -4,6 +4,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var WINDOW_MS = 10000, OFFLINE_MS = 5000, FALL_SHOW_MS = 6000, COOLDOWN_MS = 3000, FF_TO_IMPACT_MS = 1000;
   var MAX_DEVICES = 60;                 // 裝置數量上限，避免有人灌入大量假裝置拖垮畫面
+  var SID_RE = /^[A-Za-z0-9]{1,16}$/;   // 手機的隨機識別碼，用來分辨「同代號、不同手機」
   var ID_RE = /^[^\/#+\s]{1,12}$/;      // 與手機端 cleanId() 相同的代號規則
   // 用沒有原型的物件存裝置：代號叫 "__proto__"、"constructor" 也不會汙染內建物件
   var devices = Object.create(null), deviceCount = 0, selected = null, client = null;
@@ -37,6 +38,7 @@
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-tab') === tab); });
     if (location.hash.slice(1) !== tab) history.replaceState(null, '', tab === 'fall' ? location.pathname + location.search : '#' + tab);
     updateTitle();
+    if (tab === 'gyro') layoutGyro(true);
   }
   document.querySelectorAll('.tab').forEach(function (b) { b.onclick = function () { setTab(b.getAttribute('data-tab')); }; });
 
@@ -77,10 +79,28 @@
   // 第 5～9 欄（陀螺儀、傾斜）是選填：舊版手機或沒有陀螺儀的手機不會有
   function opt(v) { return (typeof v === 'number' && isFinite(v)) ? v : null; }
 
-  function ingest(id, samples, simulated) {
+  // ---------- 代號重複 ----------
+  // 同一個代號已經有另一支手機在線上時，擋下新來的手機並通知它換代號。
+  // 原本那支離線超過 OFFLINE_MS 後，新手機就可以接手（例如學生換了一支手機）。
+  var dupNotified = Object.create(null);
+  function rejectDup(id, sid) {
+    var key = id + '|' + sid, now = Date.now();
+    if (dupNotified[key] && now - dupNotified[key] < 2000) return;
+    dupNotified[key] = now;
+    if (client && client.connected) client.publish(C.topicBase + '/' + id + '/dup', JSON.stringify({ sid: sid }));
+  }
+
+  function ingest(id, samples, simulated, sid) {
+    var now = Date.now(), t = thr();
+    sid = simulated ? 'sim' : (sid || '');
+    var prev = devices[id];
+    if (prev && prev.sid !== undefined && prev.sid !== sid && now - prev.lastRx < OFFLINE_MS) {
+      if (!simulated) rejectDup(id, sid);
+      return;
+    }
     var d = getDev(id, simulated);
     if (!d) return;
-    var now = Date.now(), t = thr();
+    d.sid = sid;
     d.lastRx = now;
     for (var i = 0; i < samples.length; i++) {
       var s = samples[i];
@@ -139,7 +159,8 @@
           isFinite(s[0]) && isFinite(s[1]) && isFinite(s[2]) && isFinite(s[3]) &&
           typeof s[0] === 'number' && typeof s[1] === 'number' && typeof s[2] === 'number' && typeof s[3] === 'number';
       });
-      if (samples.length) ingest(id, samples, false);
+      var sid = typeof p.sid === 'string' && SID_RE.test(p.sid) ? p.sid : '';
+      if (samples.length) ingest(id, samples, false, sid);
     } catch (e) {}
   });
 
@@ -253,7 +274,7 @@
       ctx.fillText(g + '°', L - 6, y);
     }
     var d = devices[selected];
-    if (!d || !d.samples.length) return;
+    if (!d || !d.samples.length || collapsed) return;
     var tEnd = d.samples[d.samples.length - 1].t;
     ctx.save(); ctx.translate(0, PAD);
     drawSeries(ctx, d, 'gx', col('--x'), 1.2, L, w, h, -GYRO_MAX, GYRO_MAX, tEnd);
@@ -292,10 +313,104 @@
     el.querySelector('.phone3d').style.transform = 'rotateX(' + (-b) + 'deg) rotateY(' + g + 'deg)';
   }
 
+  // ---------- 陀螺儀分組：依代號裡的數字排序，依螢幕大小分成幾組 ----------
+  // 只看數字、忽略文字：A07 → [7]、12號 → [12]、3班5 → [3, 5]、3班14 → [3, 14]
+  // 依序比較每一段數字；沒有數字的代號排在最後；數字完全相同時才比文字
+  var MAX_GROUPS = 3;   // 最多分 3 組；螢幕太小放不下時，組內允許捲動
+  var gPage = 0, gLayoutKey = '', gLastLayout = 0;
+
+  // 收合大圖表：螢幕高度不到 900px 時預設收合，老師的選擇會記住
+  var collapsed = window.innerHeight < 900;
+  try { var saved = localStorage.getItem('iot-chart-collapsed'); if (saved !== null) collapsed = saved === '1'; } catch (e) {}
+  function applyCollapse() {
+    document.body.classList.toggle('chart-collapsed', collapsed);
+    $('chartToggle').textContent = collapsed ? '展開圖表' : '收合圖表';
+  }
+  $('chartToggle').onclick = function (e) {
+    e.stopPropagation();
+    collapsed = !collapsed;
+    try { localStorage.setItem('iot-chart-collapsed', collapsed ? '1' : '0'); } catch (err) {}
+    applyCollapse();
+    layoutGyro(true);
+  };
+  applyCollapse();
+  function numKey(id) { return (id.match(/\d+/g) || []).map(function (s) { return parseInt(s, 10); }); }
+  function sortedIds() {
+    return Object.keys(devices).sort(function (a, b) {
+      var na = numKey(a), nb = numKey(b);
+      if (!na.length !== !nb.length) return na.length ? -1 : 1;
+      for (var i = 0; i < Math.min(na.length, nb.length); i++) if (na[i] !== nb[i]) return na[i] - nb[i];
+      if (na.length !== nb.length) return na.length - nb.length;
+      return a.localeCompare(b, 'zh-Hant');
+    });
+  }
+  // 一個畫面不捲動時放得下幾張卡片
+  function gyroCapacity() {
+    var g = $('ggrid'), card = g.querySelector('.gdev');
+    var cols = getComputedStyle(g).gridTemplateColumns.split(' ').length;
+    var top = g.getBoundingClientRect().top + window.scrollY;
+    var ch = (card && card.offsetHeight ? card.offsetHeight : 173) + 12;
+    var rows = Math.max(1, Math.floor((window.innerHeight - top - 16 + 12) / ch));
+    return cols * rows;
+  }
+
+  function layoutGyro(force) {
+    var now = Date.now();
+    if (!force && now - gLastLayout < 500) return;
+    gLastLayout = now;
+    var ids = sortedIds();
+    if (!ids.length) return;
+    var cap = gyroCapacity();
+    var pages = Math.min(MAX_GROUPS, Math.max(1, Math.ceil(ids.length / cap)));
+    var per = Math.ceil(ids.length / pages);          // 平均分配，例如 30 人分 2 組 → 15 + 15
+    if (gPage >= pages) gPage = pages - 1;
+    var key = ids.join('\u0001') + '|' + per + '|' + gPage;
+    if (key === gLayoutKey && !force) return;
+    gLayoutKey = key;
+
+    var grid = $('ggrid');
+    ids.forEach(function (id, i) {
+      var el = devices[id].gel;
+      grid.appendChild(el);                              // 依排序重新排列
+      el.style.display = Math.floor(i / per) === gPage ? '' : 'none';
+    });
+
+    var pager = $('gpager');
+    pager.innerHTML = '';
+    if (pages === 1) return;
+    var label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = '共 ' + ids.length + ' 台，分 ' + pages + ' 組（← → 鍵切換）';
+    pager.appendChild(label);
+    for (var p = 0; p < pages; p++) {
+      var first = ids[p * per], last = ids[Math.min(ids.length, (p + 1) * per) - 1];
+      var b = document.createElement('button');
+      b.className = p === gPage ? 'active' : '';
+      b.textContent = '第 ' + (p + 1) + ' 組';
+      var small = document.createElement('small');
+      small.textContent = first + (first === last ? '' : '～' + last);
+      b.appendChild(small);
+      b.onclick = (function (p) { return function () { gPage = p; layoutGyro(true); }; })(p);
+      pager.appendChild(b);
+    }
+    window.__gyroGroups = { pages: pages, per: per, cap: cap, page: gPage };
+  }
+  // 簡報筆的翻頁鍵、鍵盤左右鍵都能切換組別
+  document.addEventListener('keydown', function (e) {
+    if (tab !== 'gyro' || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    var pages = window.__gyroGroups ? window.__gyroGroups.pages : 1;
+    if (pages < 2) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown') { gPage = (gPage + 1) % pages; layoutGyro(true); e.preventDefault(); }
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { gPage = (gPage - 1 + pages) % pages; layoutGyro(true); e.preventDefault(); }
+  });
+  window.addEventListener('resize', function () { if (tab === 'gyro') layoutGyro(true); });
+
   function loop() {
     var now = Date.now(), n = 0;
+    if (tab === 'gyro') layoutGyro(false);
     for (var k in devices) {
-      if (tab === 'gyro') drawGyroCard(devices[k], now); else drawCard(devices[k], now);
+      if (tab === 'gyro') { if (devices[k].gel.style.display !== 'none') drawGyroCard(devices[k], now); }
+      else drawCard(devices[k], now);
       if (now - devices[k].lastRx < OFFLINE_MS) n++;
     }
     $('count').textContent = n + ' 台裝置在線';

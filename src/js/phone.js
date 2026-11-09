@@ -13,6 +13,15 @@
 
   try { $('name').value = localStorage.getItem('iot-name') || ''; } catch (e) {}
 
+  // 這支手機的隨機識別碼：監控台用它分辨「同代號、不同手機」。
+  // 存在 localStorage，重新整理頁面時仍是同一個，不會被當成別人。
+  var sid = '';
+  try { sid = localStorage.getItem('iot-sid') || ''; } catch (e) {}
+  if (!/^[A-Za-z0-9]{1,16}$/.test(sid)) {
+    sid = Math.random().toString(36).slice(2, 10);
+    try { localStorage.setItem('iot-sid', sid); } catch (e) {}
+  }
+
   function setNet(state, text) {
     $('netDot').className = 'dot ' + state;
     $('netText').textContent = text;
@@ -62,7 +71,7 @@
 
   function flush() {
     if (!client || !client.connected || buf.length === 0) { if (buf.length > 200) buf = buf.slice(-200); return; }
-    var payload = JSON.stringify({ id: deviceId, s: buf });
+    var payload = JSON.stringify({ id: deviceId, sid: sid, s: buf });
     buf = [];
     client.publish(C.topicBase + '/' + deviceId + '/acc', payload, { qos: 0 });
     sentCount++;
@@ -78,6 +87,7 @@
     client.on('connect', function () {
       setNet('ok', '已連線到雲端（' + C.brokerUrl.split('/')[2].split(':')[0] + '）');
       client.subscribe(C.topicBase + '/' + deviceId + '/alert');
+      client.subscribe(C.topicBase + '/' + deviceId + '/dup');
     });
     client.on('reconnect', function () { setNet('warn', '重新連線中…'); });
     client.on('offline', function () { setNet('err', '網路中斷，重試中…'); });
@@ -86,6 +96,16 @@
       if (topic.slice(-6) === '/alert') {
         $('alert').classList.add('show');
         if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
+      } else if (topic.slice(-4) === '/dup') {
+        // 監控台說：這個代號已經有別的手機在用了
+        var p = null;
+        try { p = JSON.parse(msg.toString()); } catch (e) {}
+        if (!p || p.sid !== sid) return;
+        var used = deviceId;
+        stop();
+        setNet('err', '代號「' + used + '」已經有人使用');
+        $('name').focus();
+        alert('代號「' + used + '」已經有人使用，請換一個代號再按「開始傳送」。\n\n（如果是你自己剛換手機或重新開啟，請等 5 秒再試。）');
       }
     });
   }
