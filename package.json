@@ -1,0 +1,14 @@
+{
+  "name": "iot-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "手機感測器 IoT 跌倒偵測課堂示範",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js --watch"
+  },
+  "devDependencies": {
+    "less": "^4.9.1",
+    "pug": "^3.0.4"
+  }
+}

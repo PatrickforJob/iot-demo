@@ -1,0 +1,31 @@
+// 兩個頁面共用的基礎樣式
+
+@font-stack: -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+
+// 產生淺色 / 深色主題的 CSS 變數（JS 畫圖時會讀這些變數）
+.theme(@light; @dark) {
+  :root { @light(); }
+  @media (prefers-color-scheme: dark) {
+    :root { @dark(); }
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: @font-stack;
+}
+
+// 連線狀態燈號
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  &.ok   { background: var(--ok); }
+  &.warn { background: var(--warn); }
+  &.err  { background: var(--danger); }
+}

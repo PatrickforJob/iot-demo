@@ -1,0 +1,64 @@
+extends _layout
+
+mixin slider(id, label, min, max, step, value, hint)
+  .slider
+    label
+      span= label
+      b(id=id + 'Val')
+    input(type="range" id=id min=min max=max step=step value=value)
+    .hint= hint
+
+block title
+  title IoT 跌倒偵測監控台
+
+block styles
+  link(rel="stylesheet" href="css/dashboard.css")
+
+block content
+  header
+    div
+      h1 🏥 IoT 跌倒偵測監控台
+      .pipeline #[b 手機感測器] → 網路（MQTT）→ #[b 雲端 Broker] → #[b 這個監控台（AI 判斷）] → 警示回傳手機
+    .tools
+      .status
+        span.dot#netDot
+        span#netText 連線中…
+      span.status#count 0 台裝置
+      button.primary#qrBtn 顯示 QR code
+      button#simBtn 加入模擬裝置
+
+  .layout
+    div
+      .panel#detail
+        h2#detailTitle 點選下方裝置查看詳細波形
+        canvas#bigChart
+        .legend
+          span #[i.x]X 軸
+          span #[i.y]Y 軸
+          span #[i.z]Z 軸
+          span #[i.m]總加速度大小
+          span 單位：g（重力加速度，靜止時總大小 ≈ 1）
+      .grid#grid
+        .empty 等待手機連線…#[br]請學生掃描 QR code 開啟網頁
+
+    .sidecol
+      .panel
+        h2 AI 判斷規則（可調整）
+        +slider('ff', '① 失重門檻', 0.1, 0.9, 0.05, 0.5, '加速度大小低於此值 = 正在下墜')
+        +slider('im', '② 撞擊門檻', 1.5, 4, 0.1, 2.2, '加速度大小高於此值 = 撞擊地面')
+        .rule 先「失重」、接著 1 秒內「撞擊」→ 判定跌倒，並傳警示回手機。#[br]試試看：門檻調太鬆會誤報（狂搖也算跌倒），調太嚴會漏報。
+      .panel
+        h2 事件紀錄
+        ul#log
+          li.placeholder 尚無事件
+
+  #qrOverlay
+    #qrBox
+      .qr-title 用手機相機掃描
+      img#qrImg(alt="QR code")
+      .url#qrUrl
+      .qr-hint （點任意處關閉）
+
+block scripts
+  script(src="lib/qrcode.js")
+  script(src="js/dashboard.js")

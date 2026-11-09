@@ -1,134 +1,4 @@
-<!doctype html>
-<html lang="zh-Hant">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IoT 跌倒偵測監控台</title>
-<style>
-  :root {
-    --bg: #f4f6f8; --card: #ffffff; --text: #1b1f24; --muted: #667085; --border: #e4e7ec;
-    --accent: #2563eb; --ok: #15803d; --warn: #b45309; --danger: #dc2626;
-    --x: #e11d48; --y: #059669; --z: #2563eb; --m: #1b1f24; --grid: #e9ecf0;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0d1014; --card: #171b21; --text: #e8eaed; --muted: #9aa3ae; --border: #262c34;
-      --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --danger: #f87171;
-      --x: #fb7185; --y: #34d399; --z: #60a5fa; --m: #e8eaed; --grid: #232830; }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
-  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
-    padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
-  h1 { font-size: 22px; margin: 0; }
-  .pipeline { font-size: 13px; color: var(--muted); margin-top: 4px; }
-  .pipeline b { color: var(--text); font-weight: 600; }
-  .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  button { font-size: 14px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--card); color: var(--text); cursor: pointer; }
-  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .status { font-size: 14px; display: flex; align-items: center; gap: 6px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
-  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--danger); }
-  .layout { display: grid; grid-template-columns: 1fr 320px; gap: 16px; padding: 16px 20px; }
-  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
-  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
-  .panel h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
-  #detail canvas { width: 100%; height: 240px; display: block; }
-  .legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
-  .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-top: 16px; }
-  .dev { background: var(--card); border: 2px solid var(--border); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
-  .dev.sel { border-color: var(--accent); }
-  .dev.fall { border-color: var(--danger); animation: flash .5s 6 alternate; }
-  @keyframes flash { to { background: color-mix(in srgb, var(--danger) 25%, var(--card)); } }
-  .dev .top { display: flex; justify-content: space-between; align-items: baseline; }
-  .dev .name { font-size: 18px; font-weight: 700; }
-  .dev .st { font-size: 13px; font-weight: 600; }
-  .dev canvas { width: 100%; height: 60px; display: block; margin-top: 6px; }
-  .dev .meta { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; margin-top: 4px; }
-  .empty { color: var(--muted); padding: 30px 10px; text-align: center; font-size: 15px; grid-column: 1 / -1; }
-  .slider { margin-bottom: 14px; }
-  .slider label { font-size: 14px; display: flex; justify-content: space-between; }
-  .slider input { width: 100%; }
-  .slider .hint { font-size: 12px; color: var(--muted); }
-  .rule { font-size: 13px; color: var(--muted); line-height: 1.6; background: var(--bg); border-radius: 8px; padding: 10px; }
-  #log { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow: auto; font-size: 14px; }
-  #log li { padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
-  #log .t { color: var(--muted); font-variant-numeric: tabular-nums; }
-  #qrOverlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; z-index: 20; }
-  #qrOverlay.show { display: flex; }
-  #qrBox { background: #fff; color: #111; border-radius: 16px; padding: 24px; text-align: center; max-width: 92vw; }
-  #qrBox img { width: min(60vh, 80vw); height: auto; image-rendering: pixelated; }
-  #qrBox .url { font-size: 18px; margin-top: 8px; word-break: break-all; }
-  .sidecol { display: flex; flex-direction: column; gap: 16px; }
-</style>
-</head>
-<body>
-<header>
-  <div>
-    <h1>🏥 IoT 跌倒偵測監控台</h1>
-    <div class="pipeline"><b>手機感測器</b> → 網路（MQTT）→ <b>雲端 Broker</b> → <b>這個監控台（AI 判斷）</b> → 警示回傳手機</div>
-  </div>
-  <div class="tools">
-    <div class="status"><span class="dot" id="netDot"></span><span id="netText">連線中…</span></div>
-    <span class="status" id="count">0 台裝置</span>
-    <button class="primary" id="qrBtn">顯示 QR code</button>
-    <button id="simBtn">加入模擬裝置</button>
-  </div>
-</header>
-
-<div class="layout">
-  <div>
-    <div class="panel" id="detail">
-      <h2 id="detailTitle">點選下方裝置查看詳細波形</h2>
-      <canvas id="bigChart"></canvas>
-      <div class="legend">
-        <span><i style="background:var(--x)"></i>X 軸</span>
-        <span><i style="background:var(--y)"></i>Y 軸</span>
-        <span><i style="background:var(--z)"></i>Z 軸</span>
-        <span><i style="background:var(--m);height:4px"></i>總加速度大小</span>
-        <span>單位：g（重力加速度，靜止時總大小 ≈ 1）</span>
-      </div>
-    </div>
-    <div class="grid" id="grid"><div class="empty">等待手機連線…<br>請學生掃描 QR code 開啟網頁</div></div>
-  </div>
-
-  <div class="sidecol">
-    <div class="panel">
-      <h2>AI 判斷規則（可調整）</h2>
-      <div class="slider">
-        <label><span>① 失重門檻</span><b id="ffVal"></b></label>
-        <input type="range" id="ff" min="0.1" max="0.9" step="0.05" value="0.5">
-        <div class="hint">加速度大小低於此值 = 正在下墜</div>
-      </div>
-      <div class="slider">
-        <label><span>② 撞擊門檻</span><b id="imVal"></b></label>
-        <input type="range" id="im" min="1.5" max="4" step="0.1" value="2.2">
-        <div class="hint">加速度大小高於此值 = 撞擊地面</div>
-      </div>
-      <div class="rule">先「失重」、接著 1 秒內「撞擊」→ 判定跌倒，並傳警示回手機。<br>試試看：門檻調太鬆會誤報（狂搖也算跌倒），調太嚴會漏報。</div>
-    </div>
-    <div class="panel">
-      <h2>事件紀錄</h2>
-      <ul id="log"><li style="color:var(--muted)">尚無事件</li></ul>
-    </div>
-  </div>
-</div>
-
-<div id="qrOverlay">
-  <div id="qrBox">
-    <div style="font-size:24px;font-weight:700">用手機相機掃描</div>
-    <img id="qrImg" alt="QR code">
-    <div class="url" id="qrUrl"></div>
-    <div style="font-size:14px;color:#666;margin-top:6px">（點任意處關閉）</div>
-  </div>
-</div>
-
-<script src="config.js"></script>
-<script src="lib/mqtt.min.js"></script>
-<script src="lib/qrcode.js"></script>
-<script>
+// 老師端監控台：接收手機資料、畫波形、跌倒判斷、送警示
 (function () {
   var C = window.IOT_CONFIG;
   var $ = function (id) { return document.getElementById(id); };
@@ -193,7 +63,8 @@
     d.fallShownAt = Date.now();
     d.el.classList.remove('fall'); void d.el.offsetWidth; d.el.classList.add('fall');
     var log = $('log');
-    if (log.firstChild && log.firstChild.style && log.firstChild.style.color) log.innerHTML = '';
+    var placeholder = log.querySelector('.placeholder');
+    if (placeholder) placeholder.remove();
     var li = document.createElement('li');
     var tm = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     li.innerHTML = '<span>⚠️ <b></b> 跌倒（峰值 ' + peak.toFixed(1) + ' g）</span><span class="t">' + tm + '</span>';
@@ -320,8 +191,4 @@
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
-  window.addEventListener('resize', function () {});
 })();
-</script>
-</body>
-</html>
