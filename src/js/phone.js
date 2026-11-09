@@ -5,6 +5,11 @@
   var G = 9.80665;
   var client = null, running = false, buf = [], sentCount = 0, sendTimer = null, wakeLock = null, deviceId = '';
   var gotMotion = false;
+  var tilt = { b: null, g: null };   // 傾斜角度（來自 deviceorientation）
+  var lastUi = 0;                    // 畫面數字更新節流
+
+  // 保留 1 位小數；感測器沒有資料時回傳 null
+  function r1(v) { return (typeof v === 'number' && isFinite(v)) ? Math.round(v * 10) / 10 : null; }
 
   try { $('name').value = localStorage.getItem('iot-name') || ''; } catch (e) {}
 
@@ -23,10 +28,36 @@
     gotMotion = true;
     var x = a.x / G, y = a.y / G, z = a.z / G;
     var m = Math.sqrt(x * x + y * y + z * z);
-    buf.push([Date.now(), +x.toFixed(3), +y.toFixed(3), +z.toFixed(3)]);
+    // 陀螺儀：繞 X 軸（前後翻）、Y 軸（左右翻）、Z 軸（平面轉）的旋轉速度，單位 °/s
+    var r = e.rotationRate || {};
+    var gx = r1(r.beta), gy = r1(r.gamma), gz = r1(r.alpha);
+    // 每筆資料：[時間, 加速度 x, y, z, 旋轉速度 x, y, z, 傾斜 前後, 傾斜 左右]
+    buf.push([Date.now(), +x.toFixed(3), +y.toFixed(3), +z.toFixed(3), gx, gy, gz, r1(tilt.b), r1(tilt.g)]);
+
+    var now = Date.now();
+    if (now - lastUi < 66) return;   // 畫面每秒更新約 15 次就夠了
+    lastUi = now;
     $('mag').textContent = m.toFixed(2) + ' g';
     $('magBar').style.width = Math.min(100, m / 4 * 100) + '%';
     $('ax').textContent = x.toFixed(2); $('ay').textContent = y.toFixed(2); $('az').textContent = z.toFixed(2);
+    if (gx !== null) {
+      $('rot').textContent = Math.round(Math.sqrt(gx * gx + gy * gy + gz * gz)) + ' °/s';
+      $('gx').textContent = Math.round(gx); $('gy').textContent = Math.round(gy); $('gz').textContent = Math.round(gz);
+    }
+    if (tilt.b !== null) $('tilt').textContent = '傾斜：前後 ' + Math.round(tilt.b) + '°、左右 ' + Math.round(tilt.g) + '°';
+  }
+
+  function onOrient(e) {
+    if (e.beta === null) return;
+    tilt.b = e.beta; tilt.g = e.gamma;
+  }
+
+  // iPhone 需要使用者按按鈕後明確授權；動作與方向兩種一起請求（同一個授權，只會跳一次）
+  function askPermission() {
+    var asks = [];
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') asks.push(DeviceMotionEvent.requestPermission());
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') asks.push(DeviceOrientationEvent.requestPermission());
+    return Promise.all(asks.map(function (p) { return p.catch(function () { return 'error'; }); }));
   }
 
   function flush() {
@@ -65,14 +96,13 @@
     $('name').value = deviceId;
     try { localStorage.setItem('iot-name', deviceId); } catch (e) {}
 
-    // iPhone 需要使用者按按鈕後明確授權
-    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-      try {
-        var p = await DeviceMotionEvent.requestPermission();
-        if (p !== 'granted' && /iPhone|iPad|iPod/.test(navigator.userAgent)) { alert('需要允許「動作與方向」才能讀取感測器。請重新整理頁面再按一次。'); return; }
-      } catch (e) { /* 部分 Android 瀏覽器不支援此 API，直接繼續；沒資料時下方會提示 */ }
+    // 部分 Android 瀏覽器不支援 requestPermission，直接繼續；沒資料時下方會提示
+    var res = await askPermission();
+    if (res.length && res[0] !== 'granted' && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
+      alert('需要允許「動作與方向」才能讀取感測器。請重新整理頁面再按一次。'); return;
     }
     window.addEventListener('devicemotion', onMotion);
+    window.addEventListener('deviceorientation', onOrient);
     running = true;
     $('btn').textContent = '停止傳送';
     $('btn').classList.add('stop');
@@ -88,6 +118,7 @@
   function stop() {
     running = false;
     window.removeEventListener('devicemotion', onMotion);
+    window.removeEventListener('deviceorientation', onOrient);
     clearInterval(sendTimer);
     if (client) { client.end(true); client = null; }
     if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
