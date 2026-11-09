@@ -1,15 +1,7 @@
 extends _layout
 
-mixin slider(id, label, min, max, step, value, hint)
-  .slider
-    label
-      span= label
-      b(id=id + 'Val')
-    input(type="range" id=id min=min max=max step=step value=value)
-    .hint= hint
-
 block title
-  title IoT 跌倒偵測監控台
+  title IoT 陀螺儀監控台
 
 block styles
   link(rel="stylesheet" href="css/dashboard.css")
@@ -17,47 +9,36 @@ block styles
 block content
   header
     div
-      h1 🏥 IoT 跌倒偵測監控台
-      .pipeline #[b 手機感測器] → 網路（MQTT）→ #[b 雲端 Broker] → #[b 這個監控台（AI 判斷）] → 警示回傳手機
+      h1 🌀 IoT 陀螺儀監控台
+      .pipeline #[b 手機陀螺儀] → 網路（MQTT）→ #[b 雲端 Broker] → #[b 這個監控台]
     .tools
       .status
         span.dot#netDot
         span#netText 連線中…
       span.status#count 0 台裝置
       button.primary#qrBtn 顯示 QR code
-      button#simBtn 加入模擬裝置
-
-  nav.tabs
-    button.tab(data-tab="fall") 🏥 跌倒偵測（加速度）
-    button.tab(data-tab="gyro") 🌀 陀螺儀
+      button#demoBtn ＋10 個 demo user
+      button#resetBtn(disabled) 重置 demo
 
   .layout
     div
       .panel#detail
         .panel-head
           h2#detailTitle 點選下方裝置查看詳細波形
-          button.only-gyro#chartToggle 收合圖表
+          button#chartToggle 收合圖表
         canvas#bigChart
-        .legend.only-fall
-          span #[i.x]X 軸
-          span #[i.y]Y 軸
-          span #[i.z]Z 軸
-          span #[i.m]總加速度大小
-          span 單位：g（重力加速度，靜止時總大小 ≈ 1）
-        .legend.only-gyro
+        .legend
           span #[i.x]X 軸・前後翻
           span #[i.y]Y 軸・左右翻
           span #[i.z]Z 軸・平面轉
           span #[i.m]總旋轉速度
           span 單位：°/s（每秒轉幾度）
-      .grid.only-fall#grid
-        .empty 等待手機連線…#[br]請學生掃描 QR code 開啟網頁
-      .pager.only-gyro#gpager
-      .grid.only-gyro#ggrid
+      .pager#gpager
+      .grid#grid
         .empty 等待手機連線…#[br]請學生掃描 QR code 開啟網頁
 
     .sidecol
-      .panel.only-gyro
+      .panel
         h2 陀螺儀是什麼？
         .rule
           | #[b 加速度計]量的是「移動」：往哪個方向加速、有多用力。
@@ -65,21 +46,12 @@ block content
           | #[b 陀螺儀]量的是「旋轉」：繞著哪個軸轉、每秒轉幾度。
           br
           br
-          | 試試看：把手機平放在桌上慢慢轉一圈，加速度幾乎不變，但陀螺儀的「平面轉」會有明顯變化。
+          | 試試看：把手機平放在桌上慢慢轉一圈，手機沒有移動位置，但陀螺儀的「平面轉」會有明顯變化。
         .gyro-axes
           div #[b X 軸・前後翻] 像點頭，手機上緣往前或往後倒
           div #[b Y 軸・左右翻] 像翻書，手機往左或往右倒
           div #[b Z 軸・平面轉] 像方向盤，手機平放原地旋轉
         .hint 卡片上的手機圖示跟著學生手機的傾斜角度轉動（只顯示前後和左右傾斜）。
-      .panel.only-fall
-        h2 AI 判斷規則（可調整）
-        +slider('ff', '① 失重門檻', 0.1, 0.9, 0.05, 0.5, '加速度大小低於此值 = 正在下墜')
-        +slider('im', '② 撞擊門檻', 1.5, 4, 0.1, 2.2, '加速度大小高於此值 = 撞擊地面')
-        .rule 先「失重」、接著 1 秒內「撞擊」→ 判定跌倒，並傳警示回手機。#[br]試試看：門檻調太鬆會誤報（狂搖也算跌倒），調太嚴會漏報。
-      .panel.only-fall
-        h2 事件紀錄
-        ul#log
-          li.placeholder 尚無事件
 
   #qrOverlay
     #qrBox

@@ -4,7 +4,7 @@ block viewport
   meta(name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1")
 
 block title
-  title 手機感測器 IoT 裝置
+  title 手機陀螺儀 IoT 裝置
 
 block styles
   link(rel="stylesheet" href="css/phone.css")
@@ -12,11 +12,11 @@ block styles
 block content
   main
     h1 📱 我的手機是 IoT 裝置
-    p.sub 這個網頁會讀取手機的加速度感測器，透過網路即時傳到雲端。只傳加速度數字，不會讀取照片、通訊錄或任何個人資料。
+    p.sub 這個網頁會讀取手機的陀螺儀（旋轉感測器），透過網路即時傳到雲端。只傳旋轉速度和傾斜角度，不會讀取照片、通訊錄或任何個人資料。
 
     .card#setup
       label(for="name") 你的代號
-      input#name(maxlength="12" autocomplete="off" placeholder="例如：A07")
+      input#name(maxlength="12" autocomplete="off" placeholder="例如：05")
       .hint 請用座號或暱稱，不要用姓名或學號。
 
     button#btn 開始傳送
@@ -28,16 +28,9 @@ block content
           span#netText 尚未連線
         span.hint#sent 已送出 0 包
       .reading
-        label 目前加速度大小（g，靜止時約 1.0）
-        .big#mag –
-        .bar: #magBar
-        .axes
-          div #[span X]#[b#ax –]
-          div #[span Y]#[b#ay –]
-          div #[span Z]#[b#az –]
-      .reading
-        label 旋轉速度（°/s，陀螺儀）
+        label 旋轉速度（°/s，每秒轉幾度）
         .big#rot –
+        .bar: #rotBar
         .axes
           div #[span 前後翻]#[b#gx –]
           div #[span 左右翻]#[b#gy –]
@@ -46,15 +39,10 @@ block content
 
     .card
       ol.steps
-        li 輸入代號，按「開始傳送」，允許存取動作感測器。
-        li 看投影幕，找到你的代號，搖一搖手機看波形變化。
-        li 模擬跌倒：手機握緊，手快速往下甩再突然停住。
-        li 雲端偵測到跌倒時，這個畫面會變紅色。
-
-  #alert
-    .t1 ⚠️ 偵測到跌倒！
-    .t2 雲端 AI 判斷你可能跌倒了#[br]（真實系統會通知護理站）
-    button#ack 我沒事
+        li 輸入代號，按「開始傳送」，允許存取動作與方向感測器。
+        li 看投影幕，找到你的代號，轉一轉手機，看圖示跟著轉。
+        li 試試看：手機平放桌上原地轉圈，「平面轉」的數字會變大。
+        li 像點頭一樣前後翻，看「前後翻」的變化；像翻書一樣左右翻，看「左右翻」。
 
 block scripts
   script(src="js/phone.js")

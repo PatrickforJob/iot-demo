@@ -1,15 +1,12 @@
-// 學生手機端：讀加速度計、透過 MQTT 傳到雲端、接收跌倒警示
+// 學生手機端：讀陀螺儀與傾斜角度、透過 MQTT 傳到雲端
 (function () {
   var C = window.IOT_CONFIG;
   var $ = function (id) { return document.getElementById(id); };
-  var G = 9.80665;
+  var ROT_FULL = 360;   // 旋轉速度長條圖的滿格（°/s）
   var client = null, running = false, buf = [], sentCount = 0, sendTimer = null, wakeLock = null, deviceId = '';
-  var gotMotion = false;
+  var gotData = false;
   var tilt = { b: null, g: null };   // 傾斜角度（來自 deviceorientation）
   var lastUi = 0;                    // 畫面數字更新節流
-
-  // 保留 1 位小數；感測器沒有資料時回傳 null
-  function r1(v) { return (typeof v === 'number' && isFinite(v)) ? Math.round(v * 10) / 10 : null; }
 
   try { $('name').value = localStorage.getItem('iot-name') || ''; } catch (e) {}
 
@@ -31,26 +28,25 @@
     return (s || '').trim().replace(/[\/#+\s]/g, '').slice(0, 12);
   }
 
+  // 保留 1 位小數；感測器沒有資料時回傳 null
+  function r1(v) { return (typeof v === 'number' && isFinite(v)) ? Math.round(v * 10) / 10 : null; }
+
   function onMotion(e) {
-    var a = e.accelerationIncludingGravity;
-    if (!a || a.x === null) return;
-    gotMotion = true;
-    var x = a.x / G, y = a.y / G, z = a.z / G;
-    var m = Math.sqrt(x * x + y * y + z * z);
     // 陀螺儀：繞 X 軸（前後翻）、Y 軸（左右翻）、Z 軸（平面轉）的旋轉速度，單位 °/s
     var r = e.rotationRate || {};
     var gx = r1(r.beta), gy = r1(r.gamma), gz = r1(r.alpha);
-    // 每筆資料：[時間, 加速度 x, y, z, 旋轉速度 x, y, z, 傾斜 前後, 傾斜 左右]
-    buf.push([Date.now(), +x.toFixed(3), +y.toFixed(3), +z.toFixed(3), gx, gy, gz, r1(tilt.b), r1(tilt.g)]);
+    if (gx === null && tilt.b === null) return;
+    gotData = true;
+    // 每筆資料：[時間, 旋轉速度 x, y, z, 傾斜 前後, 傾斜 左右]
+    buf.push([Date.now(), gx, gy, gz, r1(tilt.b), r1(tilt.g)]);
 
     var now = Date.now();
     if (now - lastUi < 66) return;   // 畫面每秒更新約 15 次就夠了
     lastUi = now;
-    $('mag').textContent = m.toFixed(2) + ' g';
-    $('magBar').style.width = Math.min(100, m / 4 * 100) + '%';
-    $('ax').textContent = x.toFixed(2); $('ay').textContent = y.toFixed(2); $('az').textContent = z.toFixed(2);
     if (gx !== null) {
-      $('rot').textContent = Math.round(Math.sqrt(gx * gx + gy * gy + gz * gz)) + ' °/s';
+      var m = Math.sqrt(gx * gx + gy * gy + gz * gz);
+      $('rot').textContent = Math.round(m) + ' °/s';
+      $('rotBar').style.width = Math.min(100, m / ROT_FULL * 100) + '%';
       $('gx').textContent = Math.round(gx); $('gy').textContent = Math.round(gy); $('gz').textContent = Math.round(gz);
     }
     if (tilt.b !== null) $('tilt').textContent = '傾斜：前後 ' + Math.round(tilt.b) + '°、左右 ' + Math.round(tilt.g) + '°';
@@ -73,7 +69,7 @@
     if (!client || !client.connected || buf.length === 0) { if (buf.length > 200) buf = buf.slice(-200); return; }
     var payload = JSON.stringify({ id: deviceId, sid: sid, s: buf });
     buf = [];
-    client.publish(C.topicBase + '/' + deviceId + '/acc', payload, { qos: 0 });
+    client.publish(C.topicBase + '/' + deviceId + '/gyro', payload, { qos: 0 });
     sentCount++;
     $('sent').textContent = '已送出 ' + sentCount + ' 包';
   }
@@ -86,27 +82,22 @@
     });
     client.on('connect', function () {
       setNet('ok', '已連線到雲端（' + C.brokerUrl.split('/')[2].split(':')[0] + '）');
-      client.subscribe(C.topicBase + '/' + deviceId + '/alert');
       client.subscribe(C.topicBase + '/' + deviceId + '/dup');
     });
     client.on('reconnect', function () { setNet('warn', '重新連線中…'); });
     client.on('offline', function () { setNet('err', '網路中斷，重試中…'); });
     client.on('error', function () { setNet('err', '連線失敗（網路可能被擋，試試改用手機網路）'); });
     client.on('message', function (topic, msg) {
-      if (topic.slice(-6) === '/alert') {
-        $('alert').classList.add('show');
-        if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
-      } else if (topic.slice(-4) === '/dup') {
-        // 監控台說：這個代號已經有別的手機在用了
-        var p = null;
-        try { p = JSON.parse(msg.toString()); } catch (e) {}
-        if (!p || p.sid !== sid) return;
-        var used = deviceId;
-        stop();
-        setNet('err', '代號「' + used + '」已經有人使用');
-        $('name').focus();
-        alert('代號「' + used + '」已經有人使用，請換一個代號再按「開始傳送」。\n\n（如果是你自己剛換手機或重新開啟，請等 5 秒再試。）');
-      }
+      if (topic.slice(-4) !== '/dup') return;
+      // 監控台說：這個代號已經有別的手機在用了
+      var p = null;
+      try { p = JSON.parse(msg.toString()); } catch (e) {}
+      if (!p || p.sid !== sid) return;
+      var used = deviceId;
+      stop();
+      setNet('err', '代號「' + used + '」已經有人使用');
+      $('name').focus();
+      alert('代號「' + used + '」已經有人使用，請換一個代號再按「開始傳送」。\n\n（如果是你自己剛換手機或重新開啟，請等 5 秒再試。）');
     });
   }
 
@@ -131,7 +122,7 @@
     sendTimer = setInterval(flush, C.sendIntervalMs);
     try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
     setTimeout(function () {
-      if (running && !gotMotion) alert('沒有收到感測器資料。請確認是用手機開啟（電腦沒有加速度計），並使用 Safari 或 Chrome。');
+      if (running && !gotData) alert('沒有收到陀螺儀資料。請確認是用手機開啟（電腦沒有陀螺儀），並使用 Safari 或 Chrome。');
     }, 2500);
   }
 
@@ -149,5 +140,4 @@
   }
 
   $('btn').addEventListener('click', function () { running ? stop() : start(); });
-  $('ack').addEventListener('click', function () { $('alert').classList.remove('show'); });
 })();
