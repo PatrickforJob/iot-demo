@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const crypto = require('crypto');
 const pug = require('pug');
 const less = require('less');
 
@@ -32,6 +33,20 @@ async function build() {
 
   fs.cpSync(path.join(SRC, 'js'), path.join(OUT, 'js'), { recursive: true });
   fs.cpSync(path.join(SRC, 'lib'), path.join(OUT, 'lib'), { recursive: true });
+
+  // 版本號：在 HTML 裡的 css/js 網址後面加上 ?v=內容雜湊。
+  // GitHub Pages 會讓瀏覽器快取 10 分鐘；檔案內容一改，網址就跟著變，瀏覽器才會抓新版，
+  // 避免「新 HTML 配舊 JS」讓頁面壞掉。
+  for (const f of fs.readdirSync(OUT).filter(f => f.endsWith('.html'))) {
+    const file = path.join(OUT, f);
+    const html = fs.readFileSync(file, 'utf8').replace(/(href|src)="((?:css|js|lib)\/[^"?]+)"/g, (m, attr, url) => {
+      const asset = path.join(OUT, url);
+      if (!fs.existsSync(asset)) return m;
+      const v = crypto.createHash('sha1').update(fs.readFileSync(asset)).digest('hex').slice(0, 8);
+      return `${attr}="${url}?v=${v}"`;
+    });
+    fs.writeFileSync(file, html);
+  }
 
   console.log(`[build] 完成 (${Date.now() - t0} ms)`);
 }
