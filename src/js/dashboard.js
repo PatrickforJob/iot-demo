@@ -3,7 +3,10 @@
   var C = window.IOT_CONFIG;
   var $ = function (id) { return document.getElementById(id); };
   var WINDOW_MS = 10000, OFFLINE_MS = 5000, FALL_SHOW_MS = 6000, COOLDOWN_MS = 3000, FF_TO_IMPACT_MS = 1000;
-  var devices = {}, selected = null, client = null;
+  var MAX_DEVICES = 60;                 // 裝置數量上限，避免有人灌入大量假裝置拖垮畫面
+  var ID_RE = /^[^\/#+\s]{1,12}$/;      // 與手機端 cleanId() 相同的代號規則
+  // 用沒有原型的物件存裝置：代號叫 "__proto__"、"constructor" 也不會汙染內建物件
+  var devices = Object.create(null), deviceCount = 0, selected = null, client = null;
   var css = getComputedStyle(document.documentElement);
   function col(n) { return css.getPropertyValue(n).trim(); }
 
@@ -13,8 +16,11 @@
   $('ff').oninput = showThr; $('im').oninput = showThr; showThr();
 
   // ---------- QR code ----------
+  // 手機網址帶上相同的 broker 與頻道設定
   var phoneUrl = new URL('phone.html', location.href);
+  phoneUrl.search = '';
   if (C.brokerKey === '2') phoneUrl.searchParams.set('b', '2');
+  if (C.room) phoneUrl.searchParams.set('room', C.room);
   (function () {
     var qr = qrcode(0, 'M'); qr.addData(phoneUrl.href); qr.make();
     $('qrImg').src = qr.createDataURL(10, 2);
@@ -26,6 +32,8 @@
   // ---------- 裝置與跌倒偵測 ----------
   function getDev(id, simulated) {
     if (devices[id]) return devices[id];
+    if (deviceCount >= MAX_DEVICES) return null;
+    deviceCount++;
     var el = document.createElement('div');
     el.className = 'dev';
     el.innerHTML = '<div class="top"><span class="name"></span><span class="st"></span></div><canvas></canvas><div class="meta"><span class="mag"></span><span class="falls"></span></div>';
@@ -41,6 +49,7 @@
 
   function ingest(id, samples, simulated) {
     var d = getDev(id, simulated);
+    if (!d) return;
     var now = Date.now(), t = thr();
     d.lastRx = now;
     for (var i = 0; i < samples.length; i++) {
@@ -79,17 +88,25 @@
   function setNet(s, txt) { $('netDot').className = 'dot ' + s; $('netText').textContent = txt; }
   client = mqtt.connect(C.brokerUrl, { clientId: 'dash-' + Math.random().toString(16).slice(2, 10), clean: true, reconnectPeriod: 3000, connectTimeout: 8000 });
   client.on('connect', function () {
-    setNet('ok', '已連線 ' + C.brokerUrl.split('/')[2].split(':')[0]);
+    setNet('ok', '已連線 ' + C.brokerUrl.split('/')[2].split(':')[0] + (C.room ? '・頻道 ' + C.room : ''));
     client.subscribe(C.topicBase + '/+/acc');
   });
   client.on('reconnect', function () { setNet('warn', '重新連線中…'); });
   client.on('offline', function () { setNet('err', '離線（可按「加入模擬裝置」示範）'); });
   client.on('error', function () { setNet('err', '連線失敗'); });
   client.on('message', function (topic, msg) {
+    // 公開 broker 上任何人都能送訊息，所以收到的資料一律先檢查格式
     try {
-      var p = JSON.parse(msg.toString());
       var id = topic.split('/').slice(-2, -1)[0];
-      if (Array.isArray(p.s) && p.s.length) ingest(id, p.s.slice(0, 500), false);
+      if (!ID_RE.test(id)) return;
+      var p = JSON.parse(msg.toString());
+      if (!p || !Array.isArray(p.s)) return;
+      var samples = p.s.slice(0, 500).filter(function (s) {
+        return Array.isArray(s) && s.length >= 4 &&
+          isFinite(s[0]) && isFinite(s[1]) && isFinite(s[2]) && isFinite(s[3]) &&
+          typeof s[0] === 'number' && typeof s[1] === 'number' && typeof s[2] === 'number' && typeof s[3] === 'number';
+      });
+      if (samples.length) ingest(id, samples, false);
     } catch (e) {}
   });
 
